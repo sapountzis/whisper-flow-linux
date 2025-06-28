@@ -1,0 +1,375 @@
+"""Audio recording functionality for whisper-flow."""
+
+import collections
+import contextlib
+import os
+import sys
+import tempfile
+import time
+import warnings
+import wave
+
+# Suppress webrtcvad setuptools warning during import
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message="pkg_resources is deprecated",
+        category=UserWarning,
+    )
+    import webrtcvad
+
+
+# Suppress ALSA warnings during PyAudio import and usage
+@contextlib.contextmanager
+def suppress_alsa_warnings():
+    """Context manager to suppress ALSA warnings."""
+    with open(os.devnull, "w") as devnull:
+        old_stderr = sys.stderr
+        sys.stderr = devnull
+        try:
+            yield
+        finally:
+            sys.stderr = old_stderr
+
+
+try:
+    with suppress_alsa_warnings():
+        import pyaudio
+except ImportError:
+    pyaudio = None
+
+from pynput import keyboard
+
+from .config import Config
+from .system import SystemManager
+
+
+class AudioRecorder:
+    """Audio recording with Voice Activity Detection."""
+
+    def __init__(self, config: Config, system_manager: SystemManager):
+        """Initialize audio recorder.
+
+        Args:
+            config: Configuration object
+            system_manager: System manager for notifications
+
+        """
+        self.config = config
+        self.system_manager = system_manager
+        self.vad = webrtcvad.Vad(config.vad_mode)
+
+        # Initialize PyAudio with ALSA warning suppression
+        with suppress_alsa_warnings():
+            self.pa = pyaudio.PyAudio()
+
+    def record_with_vad(self, stop_event=None) -> str | None:
+        """Record audio with Voice Activity Detection.
+
+        Args:
+            stop_event: Threading event to stop recording
+
+        Returns:
+            Path to the recorded audio file, or None if cancelled
+
+        """
+        if not self._check_pyaudio():
+            return None
+
+        # Create temporary file
+        fd, output_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+
+        frame_len = int(self.config.sample_rate * self.config.frame_ms / 1000)
+        chunk = frame_len
+
+        try:
+            with suppress_alsa_warnings():
+                stream = self.pa.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=self.config.sample_rate,
+                    input_device_index=self.config.mic_device_index,
+                    input=True,
+                    frames_per_buffer=chunk,
+                )
+
+            ring_buffer = collections.deque(maxlen=20)
+            recording = False
+            frames = []
+            last_voice_time = time.time()
+
+            # Stop flag for keyboard interrupt
+            stop_flag = {"stop": False}
+
+            def on_press(key):
+                try:
+                    if key == keyboard.Key.esc:
+                        stop_flag["stop"] = True
+                        return False  # Stop listener
+                except Exception:
+                    pass
+
+            listener = keyboard.Listener(on_press=on_press)
+            listener.start()
+
+            try:
+                while not stop_flag["stop"]:
+                    # Check if stop event is set (for daemon control)
+                    if stop_event and stop_event.is_set():
+                        stop_flag["stop"] = True
+                        break
+
+                    try:
+                        buf = stream.read(chunk, exception_on_overflow=False)
+                        voiced = self.vad.is_speech(buf, self.config.sample_rate)
+                        ring_buffer.append(buf)
+
+                        if voiced:
+                            if not recording:
+                                # Start recording, include buffered audio
+                                frames.extend(ring_buffer)
+                                recording = True
+                            frames.append(buf)
+                            last_voice_time = time.time()
+                        elif recording and (
+                            time.time() - last_voice_time > self.config.silence_timeout
+                        ):
+                            # Stop recording after silence timeout
+                            stop_flag["stop"] = True
+                            break
+                    except Exception as e:
+                        print(f"Error during recording: {e}")
+                        break
+
+            finally:
+                stream.stop_stream()
+                stream.close()
+                listener.stop()
+
+            # Save the recorded audio
+            if frames:
+                self._save_wav_file(output_path, frames)
+                return output_path
+            os.unlink(output_path)
+            return None
+
+        except Exception as e:
+            print(f"Recording error: {e}")
+            try:
+                os.unlink(output_path)
+            except Exception:
+                pass
+            return None
+
+    def record_push_to_talk(self, stop_key: str, stop_event=None) -> str | None:
+        """Record audio with push-to-talk functionality.
+
+        Args:
+            stop_key: Key combination to stop recording (for display only)
+            stop_event: Threading event to stop recording
+
+        Returns:
+            Path to the recorded audio file, or None if cancelled
+
+        """
+        if not self._check_pyaudio():
+            return None
+
+        # Create temporary file
+        fd, output_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+
+        frame_len = int(self.config.sample_rate * self.config.frame_ms / 1000)
+        chunk = frame_len
+
+        try:
+            with suppress_alsa_warnings():
+                stream = self.pa.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=self.config.sample_rate,
+                    input_device_index=self.config.mic_device_index,
+                    input=True,
+                    frames_per_buffer=chunk,
+                )
+
+            frames = []
+            stop_flag = {"stop": False}
+
+            def on_press(key):
+                try:
+                    if key == keyboard.Key.esc:
+                        stop_flag["stop"] = True
+                        return False  # Stop listener
+                except Exception:
+                    pass
+
+            listener = keyboard.Listener(on_press=on_press)
+            listener.start()
+
+            try:
+                while not stop_flag["stop"]:
+                    # Check if stop event is set (for daemon control)
+                    if stop_event and stop_event.is_set():
+                        stop_flag["stop"] = True
+                        break
+
+                    try:
+                        buf = stream.read(chunk, exception_on_overflow=False)
+                        frames.append(buf)
+                    except Exception as e:
+                        print(f"Error during recording: {e}")
+                        break
+
+            finally:
+                stream.stop_stream()
+                stream.close()
+                listener.stop()
+
+            # Save the recorded audio
+            if frames:
+                self._save_wav_file(output_path, frames)
+                print("Recording stopped")
+                return output_path
+            os.unlink(output_path)
+            return None
+
+        except Exception as e:
+            print(f"Recording error: {e}")
+            try:
+                os.unlink(output_path)
+            except Exception:
+                pass
+            return None
+
+    def record_until_silence(
+        self,
+        silence_duration: float,
+        stop_event=None,
+    ) -> str | None:
+        """Record audio until silence is detected for the specified duration.
+
+        Args:
+            silence_duration: Duration of silence in seconds before stopping
+            stop_event: Threading event to stop recording
+
+        Returns:
+            Path to the recorded audio file, or None if cancelled
+
+        """
+        if not self._check_pyaudio():
+            return None
+
+        # Create temporary file
+        fd, output_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+
+        frame_len = int(self.config.sample_rate * self.config.frame_ms / 1000)
+        chunk = frame_len
+
+        try:
+            with suppress_alsa_warnings():
+                stream = self.pa.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=self.config.sample_rate,
+                    input_device_index=self.config.mic_device_index,
+                    input=True,
+                    frames_per_buffer=chunk,
+                )
+
+            frames = []
+            last_voice_time = time.time()
+            stop_flag = {"stop": False}
+            recording_started = False
+
+            def on_press(key):
+                try:
+                    if key == keyboard.Key.esc:
+                        stop_flag["stop"] = True
+                        return False  # Stop listener
+                except Exception:
+                    pass
+
+            listener = keyboard.Listener(on_press=on_press)
+            listener.start()
+
+            try:
+                while not stop_flag["stop"]:
+                    # Check if stop event is set (for daemon control)
+                    if stop_event and stop_event.is_set():
+                        stop_flag["stop"] = True
+                        break
+
+                    try:
+                        buf = stream.read(chunk, exception_on_overflow=False)
+                        frames.append(buf)
+
+                        # Check for voice activity
+                        voiced = self.vad.is_speech(buf, self.config.sample_rate)
+
+                        if voiced:
+                            last_voice_time = time.time()
+                            if not recording_started:
+                                recording_started = True
+                                print("Voice detected, recording...")
+                        elif recording_started and (
+                            time.time() - last_voice_time > silence_duration
+                        ):
+                            # Stop recording after silence duration
+                            print(
+                                f"Silence detected for {silence_duration}s, stopping...",
+                            )
+                            stop_flag["stop"] = True
+                            break
+
+                    except Exception as e:
+                        print(f"Error during recording: {e}")
+                        break
+
+            finally:
+                stream.stop_stream()
+                stream.close()
+                listener.stop()
+
+            # Save the recorded audio
+            if frames and recording_started:
+                self._save_wav_file(output_path, frames)
+                return output_path
+            os.unlink(output_path)
+            return None
+
+        except Exception as e:
+            print(f"Recording error: {e}")
+            try:
+                os.unlink(output_path)
+            except Exception:
+                pass
+            return None
+
+    def _save_wav_file(self, output_path: str, frames: list):
+        """Save recorded frames to a WAV file.
+
+        Args:
+            output_path: Path to save the WAV file
+            frames: List of audio frames to save
+
+        """
+        with wave.open(output_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(self.config.sample_rate)
+            wf.writeframes(b"".join(frames))
+
+    def _check_pyaudio(self) -> bool:
+        """Check if PyAudio is available.
+
+        Returns:
+            True if PyAudio is available, False otherwise
+
+        """
+        if pyaudio is None:
+            self.system_manager.notify("PyAudio not available")
+            return False
+        return True

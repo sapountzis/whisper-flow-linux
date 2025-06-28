@@ -1,0 +1,60 @@
+[project]
+name = "whisper-flow"
+version = "0.1.0"
+description = "AI-powered voice-to-text flow application with context-aware processing"
+readme = "README.md"
+authors = [
+    { name = "sapountzis", email = "sapountzis.andreas@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+    "requests>=2.31.0",
+    "pyaudio>=0.2.11",
+    "webrtcvad>=2.0.10",
+    "pynput>=1.7.6",
+    "typer>=0.9.0",
+    "setuptools>=69.0.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "numpy>=1.24.0",
+    "pystray>=0.19.0",
+    "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+whisper-flow = "whisper_flow.cli:main_entry"
+whisper-flow-dictation = "whisper_flow.cli:dictation_entry"
+whisper-flow-daemon = "whisper_flow.daemon:main"
+
+[project.urls]
+Homepage = "https://github.com/sapountzis/whisper-flow"
+Repository = "https://github.com/sapountzis/whisper-flow"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+
+[tool.isort]
+profile = "black"
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
