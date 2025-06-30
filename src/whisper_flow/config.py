@@ -144,7 +144,7 @@ class Config(BaseSettings):
 
     # Logging configuration
     logging_enabled: bool = Field(
-        default=False,
+        default=False,  # Disable debug logging now that hotkeys work
         description="Enable debug logging and print statements",
         env="WHISPER_FLOW_LOGGING_ENABLED",
     )

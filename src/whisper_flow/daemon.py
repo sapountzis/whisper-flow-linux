@@ -1,16 +1,18 @@
 """Background daemon for whisper-flow with system tray and global hotkeys."""
 
 import os
+import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pystray
 from PIL import Image, ImageDraw
-from pynput import keyboard
 
 from .app import WhisperFlow
 from .config import Config
+from .hotkey_manager import HotkeyManager, HotkeyMode
 
 
 class WhisperFlowDaemon:
@@ -24,11 +26,15 @@ class WhisperFlowDaemon:
         self.is_recording = False
         self.current_mode = None
         self.recording_thread = None
-        self.auto_stop_timer = None
-        self.hotkey_listener = None
-        self.keyboard_listener = None
         self.stop_recording_event = None
-        self.pressed_keys = set()
+
+        # Processing state management
+        self.processing_lock = threading.Lock()
+        self.request_queue = queue.Queue()
+        self.is_processing = False
+
+        # Initialize the new HotkeyManager
+        self.hotkey_manager = HotkeyManager()
 
         # Initialize WhisperFlow instances for different modes
         self.transcribe_app = WhisperFlow(config_dir, "transcribe")
@@ -66,43 +72,6 @@ class WhisperFlowDaemon:
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         with open(pid_file, "w") as f:
             f.write(str(os.getpid()))
-
-    def _convert_hotkey_string(self, hotkey_str: str) -> str:
-        """Convert hotkey string to pynput format.
-
-        Args:
-            hotkey_str: Hotkey string like 'ctrl+cmd+space'
-
-        Returns:
-            Pynput formatted hotkey string
-
-        """
-        # Convert common key names to pynput format
-        key_mapping = {
-            "ctrl": "<ctrl>",
-            "alt": "<alt>",
-            "shift": "<shift>",
-            "cmd": "<cmd>",  # Command/Super/Windows key
-            "opt": "<cmd>",  # Option key (same as cmd on most systems)
-            "super": "<cmd>",  # Super key (alternative name)
-            "space": "<space>",
-            "escape": "<esc>",
-            "enter": "<enter>",
-            "tab": "<tab>",
-        }
-
-        parts = hotkey_str.lower().split("+")
-        converted_parts = []
-
-        for part in parts:
-            part = part.strip()
-            if part in key_mapping:
-                converted_parts.append(key_mapping[part])
-            else:
-                # Single character keys don't need brackets
-                converted_parts.append(part)
-
-        return "+".join(converted_parts)
 
     def create_tray_icon(self) -> Image.Image:
         """Create the system tray icon."""
@@ -168,17 +137,17 @@ class WhisperFlowDaemon:
         return pystray.Menu(
             pystray.MenuItem("WhisperFlow Daemon", None, enabled=False),
             pystray.MenuItem(
-                f"Transcribe: {self.config.hotkey_transcribe}",
+                f"Transcribe (Push-to-Talk): {self.config.hotkey_transcribe}",
                 None,
                 enabled=False,
             ),
             pystray.MenuItem(
-                f"Auto-Transcribe: {self.config.hotkey_auto_transcribe}",
+                f"Auto-Transcribe (Single Press): {self.config.hotkey_auto_transcribe}",
                 None,
                 enabled=False,
             ),
             pystray.MenuItem(
-                f"Command: {self.config.hotkey_command}",
+                f"Command (Push-to-Talk): {self.config.hotkey_command}",
                 None,
                 enabled=False,
             ),
@@ -188,138 +157,85 @@ class WhisperFlowDaemon:
         )
 
     def setup_hotkeys(self):
-        """Register global hotkeys using pynput with proper push-to-talk support."""
+        """Register global hotkeys using the new HotkeyManager."""
         try:
-            # Setup keyboard listener for push-to-talk
-            self.keyboard_listener = keyboard.Listener(
-                on_press=self._on_key_press,
-                on_release=self._on_key_release,
+            # Register processing callback
+            self.hotkey_manager.register_processing_callback(self._is_processing)
+
+            # Register transcribe hotkey (push-to-talk)
+            self.hotkey_manager.register_hotkey(
+                name="transcribe",
+                keys=self.config.hotkey_transcribe,
+                mode=HotkeyMode.PUSH_TO_TALK,
+                callback_press=lambda: self._handle_hotkey_press("transcribe"),
+                callback_release=lambda: self._stop_recording_if_active("transcribe"),
+                priority=1,
+                description="Push-to-talk transcription",
             )
-            self.keyboard_listener.start()
 
-            # Convert hotkey strings for single-press actions
-            auto_transcribe_key = self._convert_hotkey_string(
-                self.config.hotkey_auto_transcribe,
+            # Register auto-transcribe hotkey (single press)
+            self.hotkey_manager.register_hotkey(
+                name="auto_transcribe",
+                keys=self.config.hotkey_auto_transcribe,
+                mode=HotkeyMode.SINGLE_PRESS,
+                callback_press=lambda: self._handle_hotkey_press("auto_transcribe"),
+                priority=3,  # Highest priority since it has most keys
+                description="Auto-stop transcription",
             )
-            command_key = self._convert_hotkey_string(self.config.hotkey_command)
 
-            # Create hotkey mapping for single-press actions
-            hotkeys = {
-                auto_transcribe_key: lambda: self._single_press_action(
-                    "auto_transcribe",
-                ),
-                command_key: lambda: self._single_press_action("command"),
-                "<esc>": self.cancel_recording,
-                "<f1>": self.show_notification_menu,
-            }
+            # Register command hotkey (push-to-talk)
+            self.hotkey_manager.register_hotkey(
+                name="command",
+                keys=self.config.hotkey_command,
+                mode=HotkeyMode.PUSH_TO_TALK,
+                callback_press=lambda: self._handle_hotkey_press("command"),
+                callback_release=lambda: self._stop_recording_if_active("command"),
+                priority=2,  # Higher than transcribe since it has more keys
+                description="Push-to-talk command mode with AI",
+            )
 
-            # Create and start global hotkey listener
-            self.hotkey_listener = keyboard.GlobalHotKeys(hotkeys)
-            self.hotkey_listener.start()
+            # Set up escape key handling for canceling recordings
+            self.hotkey_manager._handle_escape_key = self.cancel_recording
+
+            # Start the hotkey manager
+            self.hotkey_manager.start()
 
         except Exception as e:
             self.notify(f"Error setting up hotkeys: {e}")
-            self.hotkey_listener = None
-            self.keyboard_listener = None
 
-    def _parse_hotkey_combination(self, hotkey_str: str) -> set:
-        """Parse hotkey string into a set of key names."""
-        parts = hotkey_str.lower().split("+")
-        key_set = set()
+    def _is_processing(self) -> bool:
+        """Check if system is currently processing a request."""
+        return self.is_processing or self.is_recording
 
-        key_mapping = {
-            "ctrl": "ctrl",
-            "cmd": "cmd",
-            "alt": "alt",
-            "shift": "shift",
-            "space": "space",
-        }
+    def _handle_hotkey_press(self, mode: str):
+        """Handle hotkey press with queuing support."""
+        if self.is_processing or self.is_recording:
+            # Queue the request
+            self.request_queue.put((mode, time.time()))
+            self.notify(f"Queued {mode} request")
+        else:
+            # Process immediately
+            self._process_mode(mode)
 
-        for part in parts:
-            part = part.strip()
-            if part in key_mapping:
-                key_set.add(key_mapping[part])
-            else:
-                key_set.add(part)
+    def _process_mode(self, mode: str):
+        """Process a mode with proper locking."""
+        with self.processing_lock:
+            self.is_processing = True
+            try:
+                self.start_recording(mode)
+            finally:
+                self.is_processing = False
+                # Process next item in queue
+                self._process_next_in_queue()
 
-        return key_set
-
-    def _get_key_name(self, key):
-        """Get standardized key name from pynput key object."""
+    def _process_next_in_queue(self):
+        """Process next item in queue if any."""
         try:
-            if hasattr(key, "name"):
-                return key.name.lower()
-            if hasattr(key, "char") and key.char:
-                return key.char.lower()
-            return str(key).lower()
-        except:
-            return str(key).lower()
-
-    def _on_key_press(self, key):
-        """Handle key press events for push-to-talk detection."""
-        try:
-            key_name = self._get_key_name(key)
-
-            # Map pynput key names to our standard names
-            key_mapping = {
-                "ctrl_l": "ctrl",
-                "ctrl_r": "ctrl",
-                "cmd_l": "cmd",
-                "cmd_r": "cmd",
-                "alt_l": "alt",
-                "alt_r": "alt",
-                "shift_l": "shift",
-                "shift_r": "shift",
-            }
-
-            key_name = key_mapping.get(key_name, key_name)
-            self.pressed_keys.add(key_name)
-
-            # Check if transcribe hotkey combination is pressed
-            transcribe_keys = self._parse_hotkey_combination(
-                self.config.hotkey_transcribe,
-            )
-            if transcribe_keys.issubset(self.pressed_keys) and not self.is_recording:
-                self.start_recording("transcribe")
-
-        except Exception:
-            pass  # Silently ignore key handling errors
-
-    def _on_key_release(self, key):
-        """Handle key release events for push-to-talk detection."""
-        try:
-            key_name = self._get_key_name(key)
-
-            # Map pynput key names to our standard names
-            key_mapping = {
-                "ctrl_l": "ctrl",
-                "ctrl_r": "ctrl",
-                "cmd_l": "cmd",
-                "cmd_r": "cmd",
-                "alt_l": "alt",
-                "alt_r": "alt",
-                "shift_l": "shift",
-                "shift_r": "shift",
-            }
-
-            key_name = key_mapping.get(key_name, key_name)
-            self.pressed_keys.discard(key_name)
-
-            # Check if transcribe hotkey was released and we're recording transcribe mode
-            transcribe_keys = self._parse_hotkey_combination(
-                self.config.hotkey_transcribe,
-            )
-            if self.is_recording and self.current_mode == "transcribe":
-                if not transcribe_keys.issubset(self.pressed_keys):
-                    self._stop_recording()
-
-        except Exception:
-            pass  # Silently ignore key handling errors
-
-    def _single_press_action(self, mode: str):
-        """Handle single-press actions (auto-transcribe, command)."""
-        if not self.is_recording:
-            self.start_recording(mode)
+            if not self.request_queue.empty():
+                mode, timestamp = self.request_queue.get_nowait()
+                self._process_mode(mode)
+        except queue.Empty:
+            pass
 
     def start_recording(self, mode: str):
         """Start recording in the specified mode."""
@@ -342,6 +258,11 @@ class WhisperFlowDaemon:
         )
         self.recording_thread.start()
 
+    def _stop_recording_if_active(self, mode: str):
+        """Stop recording if the specified mode is currently active."""
+        if self.is_recording and self.current_mode == mode:
+            self._stop_recording()
+
     def _record_audio_thread(self, mode: str):
         """Handle audio recording in a separate thread."""
         try:
@@ -352,14 +273,19 @@ class WhisperFlowDaemon:
                 success = app.run_voice_flow_auto_stop(
                     silence_duration=self.config.auto_stop_silence_duration,
                 )
-            elif mode == "transcribe":
+            elif mode in ["transcribe", "command"]:
                 # Push-to-talk mode: record until stop event is set
+                hotkey = (
+                    self.config.hotkey_transcribe
+                    if mode == "transcribe"
+                    else self.config.hotkey_command
+                )
                 success = app.run_voice_flow_push_to_talk_daemon(
-                    stop_key=self.config.hotkey_transcribe,
+                    stop_key=hotkey,
                     stop_event=self.stop_recording_event,
                 )
             else:
-                # Command mode: single press, auto-stop on silence
+                # Fallback to auto-stop
                 success = app.run_voice_flow_auto_stop(
                     silence_duration=self.config.auto_stop_silence_duration,
                 )
@@ -405,11 +331,6 @@ class WhisperFlowDaemon:
         # Restore normal tray icon
         if self.tray_icon:
             self.tray_icon.icon = self.create_tray_icon()
-
-        # Cancel auto-stop timer if active
-        if self.auto_stop_timer:
-            self.auto_stop_timer.cancel()
-            self.auto_stop_timer = None
 
     def notify(self, message: str):
         """Send desktop notification."""
@@ -633,12 +554,9 @@ Use 'whisper-flow stop' to exit daemon
     def _cleanup(self):
         """Cleanup resources after running."""
         try:
-            if self.hotkey_listener:
-                self.hotkey_listener.stop()
-                self.hotkey_listener = None
-            if self.keyboard_listener:
-                self.keyboard_listener.stop()
-                self.keyboard_listener = None
+            # Stop the hotkey manager
+            if self.hotkey_manager:
+                self.hotkey_manager.stop()
         except Exception:
             pass
 

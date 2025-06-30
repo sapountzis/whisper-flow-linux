@@ -15,12 +15,19 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
 
@@ -30,23 +37,71 @@ class TestWhisperFlowDaemon:
             assert daemon.is_recording is False
             assert daemon.current_mode is None
             assert daemon.recording_thread is None
-            assert daemon.auto_stop_timer is None
-            assert daemon.hotkey_listener is None
-            assert daemon.keyboard_listener is None
             assert daemon.stop_recording_event is None
-            assert daemon.pressed_keys == set()
+
+            # Check that HotkeyManager was initialized
+            assert daemon.hotkey_manager == mock_hotkey_manager
+            mock_hotkey_manager_class.assert_called_once()
 
             # Check that WhisperFlow instances were created for different modes
             assert mock_app_class.call_count == 3
+
+    def test_setup_hotkeys(self, temp_config_dir):
+        """Test hotkey setup with HotkeyManager."""
+        with (
+            patch("whisper_flow.daemon.Config") as mock_config_class,
+            patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
+        ):
+            mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
+            mock_config_class.return_value = mock_config
+
+            mock_app = Mock()
+            mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
+            daemon = WhisperFlowDaemon(temp_config_dir)
+            daemon.setup_hotkeys()
+
+            # Verify that hotkeys were registered
+            assert mock_hotkey_manager.register_hotkey.call_count == 3
+            mock_hotkey_manager.start.assert_called_once()
+
+            # Check that the correct hotkeys were registered
+            register_calls = mock_hotkey_manager.register_hotkey.call_args_list
+
+            # Verify transcribe hotkey
+            transcribe_call = register_calls[0]
+            assert transcribe_call[1]["name"] == "transcribe"
+            assert transcribe_call[1]["keys"] == "ctrl+cmd"
+
+            # Verify auto_transcribe hotkey
+            auto_transcribe_call = register_calls[1]
+            assert auto_transcribe_call[1]["name"] == "auto_transcribe"
+            assert auto_transcribe_call[1]["keys"] == "ctrl+cmd+space"
+
+            # Verify command hotkey
+            command_call = register_calls[2]
+            assert command_call[1]["name"] == "command"
+            assert command_call[1]["keys"] == "ctrl+cmd+alt"
 
     def test_test_configuration_success(self, temp_config_dir):
         """Test configuration testing with successful validation."""
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.daemon.WhisperFlowDaemon.notify") as mock_notify,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
@@ -60,6 +115,9 @@ class TestWhisperFlowDaemon:
                 ],
             }
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app
@@ -76,9 +134,13 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.daemon.WhisperFlowDaemon.notify") as mock_notify,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
@@ -89,6 +151,9 @@ class TestWhisperFlowDaemon:
                 ],
             }
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app
@@ -104,9 +169,13 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.daemon.WhisperFlowDaemon.notify") as mock_notify,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
@@ -117,6 +186,9 @@ class TestWhisperFlowDaemon:
                 ],
             }
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app
@@ -132,14 +204,21 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.daemon.WhisperFlowDaemon.notify") as mock_notify,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app.run_comprehensive_validation.side_effect = Exception("Test error")
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app
@@ -155,13 +234,20 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.daemon.WhisperFlowDaemon.notify") as mock_notify,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.is_running = True
@@ -178,13 +264,20 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.daemon.WhisperFlowDaemon.notify") as mock_notify,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
 
@@ -199,12 +292,19 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app
@@ -218,12 +318,19 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.auto_transcribe_app = mock_app
@@ -237,12 +344,19 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.command_app = mock_app
@@ -256,12 +370,19 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app  # Default fallback
@@ -275,11 +396,18 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.is_recording = True
             daemon.current_mode = "transcribe"
@@ -292,11 +420,18 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.is_recording = True
             daemon.current_mode = "transcribe"
@@ -306,21 +441,59 @@ class TestWhisperFlowDaemon:
             assert daemon.is_recording is False
             assert daemon.current_mode is None
 
+    def test_stop_recording_if_active(self, temp_config_dir):
+        """Test stopping recording only if the specified mode is active."""
+        with (
+            patch("whisper_flow.daemon.Config") as mock_config_class,
+            patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
+        ):
+            mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
+            mock_config_class.return_value = mock_config
+            mock_app = Mock()
+            mock_app_class.return_value = mock_app
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
+            daemon = WhisperFlowDaemon(temp_config_dir)
+
+            # Test when recording and mode matches
+            daemon.is_recording = True
+            daemon.current_mode = "transcribe"
+            daemon._stop_recording_if_active("transcribe")
+            assert daemon.is_recording is False
+
+            # Test when recording but mode doesn't match
+            daemon.is_recording = True
+            daemon.current_mode = "command"
+            daemon._stop_recording_if_active("transcribe")
+            assert daemon.is_recording is True  # Should not stop
+
     def test_notify(self, temp_config_dir):
         """Test notification functionality."""
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.system.subprocess.Popen") as mock_popen,
             patch("whisper_flow.system.shutil.which", return_value=True),
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config.notification_timeout = 5000
             mock_config_class.return_value = mock_config
             mock_app = Mock()
             mock_system_manager = Mock()
             mock_app.system_manager = mock_system_manager
             mock_app_class.return_value = mock_app
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app
             daemon.notify("Test message")
@@ -331,38 +504,51 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
             patch("whisper_flow.system.shutil.which", return_value=None),
             patch("builtins.print") as mock_print,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
             mock_app = Mock()
             mock_system_manager = Mock()
             mock_app.system_manager = mock_system_manager
             mock_app_class.return_value = mock_app
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
             daemon = WhisperFlowDaemon(temp_config_dir)
             daemon.transcribe_app = mock_app
             daemon.notify("Test message")
             mock_system_manager.notify.assert_called_once_with("Test message")
 
-    def test_convert_hotkey_string(self, temp_config_dir):
-        """Test hotkey string conversion."""
+    def test_cleanup(self, temp_config_dir):
+        """Test cleanup functionality."""
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
             daemon = WhisperFlowDaemon(temp_config_dir)
-            # The actual output is <ctrl>+<shift>+t, so update the test to expect that
-            assert daemon._convert_hotkey_string("ctrl+shift+t") == "<ctrl>+<shift>+t"
-            assert daemon._convert_hotkey_string("Ctrl+Shift+T") == "<ctrl>+<shift>+t"
-            assert daemon._convert_hotkey_string("CTRL+SHIFT+T") == "<ctrl>+<shift>+t"
-            assert (
-                daemon._convert_hotkey_string("ctrl + shift + t") == "<ctrl>+<shift>+t"
-            )
+            daemon.is_running = True
+            daemon._cleanup()
+
+            # Verify hotkey manager was stopped
+            mock_hotkey_manager.stop.assert_called_once()
+            assert daemon.is_running is False
 
     @pytest.mark.integration
     def test_create_tray_icon(self, temp_config_dir):
@@ -370,12 +556,19 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
 
@@ -390,12 +583,19 @@ class TestWhisperFlowDaemon:
         with (
             patch("whisper_flow.daemon.Config") as mock_config_class,
             patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
         ):
             mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
             mock_config_class.return_value = mock_config
 
             mock_app = Mock()
             mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
 
             daemon = WhisperFlowDaemon(temp_config_dir)
 

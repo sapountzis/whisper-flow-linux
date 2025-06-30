@@ -29,7 +29,13 @@ class PromptManager:
             System message asking the LLM to be a helpful assistant
 
         """
-        return "You are a helpful assistant. Process the user's input and provide a useful response."
+        return (
+            "You are a helpful assistant. "
+            "Process the user's input and provide a useful response. "
+            "You must always reply with only what the user asked for. "
+            "No intro. No outro. No explanation. No apologies. "
+            "No markdown. No formatting. No emojis. "
+        )
 
     def get_user_message(self, transcript: str) -> str:
         """Get the user message with context variables.
@@ -52,20 +58,32 @@ class PromptManager:
         # Get highlighted text if any
         highlighted_text = self.system_manager.get_highlighted_text()
 
-        # Build the user message
-        message_parts = []
+        message_template = """
+# Context
+<context>
+Date: {date}
+Time: {time}
+</context>
 
-        # Add context information
-        message_parts.append(f"Date: {date}")
-        message_parts.append(f"Time: {time}")
+# Use selected text if any
+<selected_text>
+{highlighted_text}
+</selected_text>
 
-        if highlighted_text:
-            message_parts.append(f"Highlighted text: {highlighted_text}")
+# User input
+<user_input>
+{transcript}
+</user_input>
+"""
 
-        # Add the user's transcript
-        message_parts.append(f"User input: {transcript}")
-
-        return "\n".join(message_parts)
+        return message_template.format(
+            date=date,
+            time=time,
+            highlighted_text=f"Highlighted text: {highlighted_text}"
+            if highlighted_text
+            else "",
+            transcript=transcript,
+        )
 
     def get_messages(self, transcript: str) -> list[MessageType]:
         """Get the complete message list for the LLM.
