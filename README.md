@@ -192,8 +192,8 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/sapountzis/whisper-flow/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/sapountzis/whisper-flow/discussions)
+- **Issues**: [GitHub Issues](https://github.com/sapountzis/open-whisper-flow/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/sapountzis/open-whisper-flow/discussions)
 
 ### Manual Testing
 
