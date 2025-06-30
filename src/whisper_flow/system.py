@@ -233,3 +233,34 @@ class SystemManager:
             "active_window": self.get_active_window_title(),
             "mouse_position": self.get_mouse_position(),
         }
+
+    def get_highlighted_text(self) -> str | None:
+        """Get highlighted text from the current application using the primary selection (X11)."""
+        try:
+            if shutil.which("xclip"):
+                result = subprocess.run(
+                    ["xclip", "-selection", "primary", "-o"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                )
+                if result.returncode == 0:
+                    text_out = result.stdout.strip()
+                    if text_out:
+                        return text_out
+            elif shutil.which("xsel"):
+                result = subprocess.run(
+                    ["xsel", "--primary", "--output"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                )
+                if result.returncode == 0:
+                    text_out = result.stdout.strip()
+                    if text_out:
+                        return text_out
+            return None
+        except Exception:
+            return None

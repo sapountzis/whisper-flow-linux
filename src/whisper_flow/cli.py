@@ -183,21 +183,12 @@ def status(config_dir: ConfigDirOption = None):
     typer.echo(f"  Completion Available: {completion_available}")
     typer.echo()
 
-    # Prompt statistics for all modes
-    typer.echo("Prompt Files:")
-    mode_files = ["default", "dictation", "transcribe", "auto_transcribe", "command"]
-    for mode in mode_files:
-        try:
-            prompts = flow_app.config.get_prompts_config(mode)
-            file_path = (
-                flow_app.config.config_dir / f"{mode}.yaml"
-                if mode != "default"
-                else flow_app.config.config_dir / "prompts.yaml"
-            )
-            exists = "✓" if file_path.exists() else "✗"
-            typer.echo(f"  {mode.title()}: {len(prompts)} prompts {exists}")
-        except Exception:
-            typer.echo(f"  {mode.title()}: Error loading")
+    # Prompt system information
+    typer.echo("Prompt System:")
+    prompt_info = flow_app.prompt_manager.get_prompt_info()
+    typer.echo(f"  System: {prompt_info['system']}")
+    typer.echo(f"  Variables: {', '.join(prompt_info['variables'])}")
+    typer.echo(f"  Description: {prompt_info['description']}")
     typer.echo()
 
     # Usage instructions

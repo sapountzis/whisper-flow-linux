@@ -1,10 +1,17 @@
 """Text completion functionality for whisper-flow."""
 
 import time
+from typing import TypedDict
 
-import requests
+from openai import OpenAI
 
 from .config import Config
+
+
+# Message type definitions
+class MessageType(TypedDict):
+    role: str
+    content: str
 
 
 class CompletionService:
@@ -18,25 +25,32 @@ class CompletionService:
 
         """
         self.config = config
+        self.client = (
+            OpenAI(api_key=config.openai_api_key) if config.openai_api_key else None
+        )
 
-    def complete_text(self, prompt: str, max_retries: int = 3) -> str | None:
+    def complete_text(
+        self,
+        messages: list[MessageType],
+        max_retries: int = 3,
+    ) -> str | None:
         """Complete text using OpenAI chat completion API.
 
         Args:
-            prompt: Input prompt for completion
+            messages: List of message dictionaries with 'role' and 'content' keys
             max_retries: Maximum number of retry attempts
 
         Returns:
             Completed text or None if failed
 
         """
-        if not prompt.strip():
+        if not messages or not any(msg.get("content", "").strip() for msg in messages):
             return None
 
         for attempt in range(max_retries):
             try:
-                return self._complete_with_openai(prompt)
-            except requests.exceptions.RequestException as e:
+                return self._complete_with_openai(messages)
+            except Exception as e:
                 if attempt == max_retries - 1:
                     raise RuntimeError(
                         f"Completion failed after {max_retries} attempts: {e}",
@@ -51,126 +65,98 @@ class CompletionService:
 
         return None
 
-    def _complete_with_openai(self, prompt: str) -> str:
+    def _complete_with_openai(self, messages: list[MessageType]) -> str:
         """Complete text using OpenAI API.
 
         Args:
-            prompt: Input prompt for completion
+            messages: List of message dictionaries with 'role' and 'content' keys
 
         Returns:
             Completed text
 
         Raises:
-            RuntimeError: If API key is not configured
-            requests.exceptions.RequestException: If API request fails
+            RuntimeError: If API key is not configured or client is not initialized
 
         """
-        if not self.config.openai_api_key:
+        if not self.client:
             raise RuntimeError("OpenAI API key not configured")
 
-        payload = {
-            "model": self.config.completion_model,
-            "temperature": self.config.temperature,
-            "messages": [
-                {"role": "user", "content": prompt},
-            ],
-        }
-
-        response = requests.post(
-            self.config.openai_url,
-            headers=self.config.openai_headers,
-            json=payload,
-            timeout=60,
+        response = self.client.chat.completions.create(
+            model=self.config.completion_model,
+            temperature=self.config.temperature,
+            messages=messages,
         )
-        response.raise_for_status()
 
-        response_data = response.json()
-        if "choices" not in response_data or not response_data["choices"]:
-            raise RuntimeError("Invalid response format from OpenAI API")
+        return response.choices[0].message.content.strip()
 
-        return response_data["choices"][0]["message"]["content"].strip()
-
-    def stream_completion(self, prompt: str, callback=None) -> str | None:
+    def stream_completion(
+        self,
+        messages: list[MessageType],
+        callback=None,
+    ) -> str | None:
         """Stream text completion using OpenAI API.
 
         Args:
-            prompt: Input prompt for completion
+            messages: List of message dictionaries with 'role' and 'content' keys
             callback: Optional callback function for streaming updates
 
         Returns:
             Complete text or None if failed
 
         """
-        if not self.config.openai_api_key:
+        if not self.client:
             raise RuntimeError("OpenAI API key not configured")
 
-        payload = {
-            "model": self.config.completion_model,
-            "temperature": self.config.temperature,
-            "messages": [
-                {"role": "user", "content": prompt},
-            ],
-            "stream": True,
-        }
-
         try:
-            response = requests.post(
-                self.config.openai_url,
-                headers=self.config.openai_headers,
-                json=payload,
-                timeout=60,
+            stream = self.client.chat.completions.create(
+                model=self.config.completion_model,
+                temperature=self.config.temperature,
+                messages=messages,
                 stream=True,
             )
-            response.raise_for_status()
 
             complete_text = ""
-            for line in response.iter_lines():
-                if line:
-                    line_text = line.decode("utf-8")
-                    if line_text.startswith("data: "):
-                        data_str = line_text[6:]  # Remove 'data: ' prefix
-                        if data_str.strip() == "[DONE]":
-                            break
-
-                        try:
-                            import json
-
-                            data = json.loads(data_str)
-                            if data.get("choices"):
-                                delta = data["choices"][0].get("delta", {})
-                                if "content" in delta:
-                                    content = delta["content"]
-                                    complete_text += content
-                                    if callback:
-                                        callback(content)
-                        except json.JSONDecodeError:
-                            continue
+            for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    content = chunk.choices[0].delta.content
+                    complete_text += content
+                    if callback:
+                        callback(content)
 
             return complete_text.strip()
 
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             print(f"Streaming completion failed: {e}")
             return None
 
-    def validate_prompt(self, prompt: str) -> bool:
-        """Validate prompt for completion.
+    def validate_messages(self, messages: list[MessageType]) -> bool:
+        """Validate messages for completion.
 
         Args:
-            prompt: Prompt text to validate
+            messages: List of message dictionaries
 
         Returns:
             True if valid, False otherwise
 
         """
-        if not prompt or not prompt.strip():
+        if not messages:
             return False
 
-        # Check prompt length (approximate token limit)
+        for message in messages:
+            if not isinstance(message, dict):
+                return False
+            if "role" not in message or "content" not in message:
+                return False
+            if not message["role"] or not message["content"].strip():
+                return False
+
+        # Check total message length (approximate token limit)
         # Rough estimate: 1 token ≈ 4 characters
         max_chars = 4000 * 4  # Conservative estimate for GPT-4
-        if len(prompt) > max_chars:
+        total_length = sum(len(msg.get("content", "")) for msg in messages)
+        if total_length > max_chars:
             print(
-                f"Prompt too long: {len(prompt)} characters (estimated max: {max_chars})",
+                f"Messages too long: {total_length} characters (estimated max: {max_chars})",
             )
             return False
 
@@ -187,8 +173,8 @@ class CompletionService:
             "openai_available": self.config.openai_api_key is not None,
             "current_model": self.config.completion_model,
             "temperature": self.config.temperature,
-            "completion_url": self.config.openai_url,
             "streaming_supported": True,
+            "chat_mode": True,
         }
 
     def estimate_tokens(self, text: str) -> int:
@@ -204,11 +190,15 @@ class CompletionService:
         # Rough estimation: 1 token ≈ 4 characters for English text
         return len(text) // 4
 
-    def estimate_cost(self, prompt: str, completion: str = "") -> dict:
+    def estimate_cost(
+        self,
+        messages: list[MessageType],
+        completion: str = "",
+    ) -> dict:
         """Estimate API cost for completion.
 
         Args:
-            prompt: Input prompt
+            messages: List of message dictionaries
             completion: Completion text (if available)
 
         Returns:
@@ -228,7 +218,9 @@ class CompletionService:
             return {"error": f"Pricing not available for model: {model}"}
 
         pricing = model_pricing[model]
-        input_tokens = self.estimate_tokens(prompt)
+        input_tokens = sum(
+            self.estimate_tokens(msg.get("content", "")) for msg in messages
+        )
         output_tokens = self.estimate_tokens(completion)
 
         input_cost = input_tokens * pricing["input"] / 1000  # Pricing is per 1K tokens

@@ -425,12 +425,37 @@ class WhisperFlowDaemon:
     def test_configuration(self, icon, item):
         """Test system configuration."""
         try:
-            validation = self.transcribe_app.validate_configuration()
-            if validation["valid"]:
-                self.notify("✅ Configuration is valid!")
+            validation_results = self.transcribe_app.run_comprehensive_validation()
+
+            # Count pass/fail/warn results
+            total_tests = 0
+            passed_tests = 0
+            failed_tests = 0
+            warning_tests = 0
+
+            for category, tests in validation_results.items():
+                for test in tests:
+                    total_tests += 1
+                    if test["status"] == "pass":
+                        passed_tests += 1
+                    elif test["status"] == "fail":
+                        failed_tests += 1
+                    elif test["status"] == "warn":
+                        warning_tests += 1
+
+            if failed_tests == 0 and warning_tests == 0:
+                self.notify(
+                    f"✅ Configuration is valid! ({passed_tests}/{total_tests} tests passed)",
+                )
+            elif failed_tests == 0:
+                self.notify(
+                    f"⚠️ Configuration has warnings ({passed_tests} passed, {warning_tests} warnings)",
+                )
             else:
-                issues = ", ".join(validation["issues"][:2])  # Show first 2 issues
-                self.notify(f"❌ Configuration issues: {issues}")
+                self.notify(
+                    f"❌ Configuration has issues ({passed_tests} passed, {failed_tests} failed, {warning_tests} warnings)",
+                )
+
         except Exception as e:
             self.notify(f"❌ Configuration test failed: {e}")
 

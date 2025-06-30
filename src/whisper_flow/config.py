@@ -72,6 +72,11 @@ class Config(BaseSettings):
         description="Audio sample rate in Hz",
         env="SAMPLE_RATE",
     )
+    speedup_audio: float = Field(
+        default=1,
+        description="Audio speed multiplier (1.0 = normal speed, 1.5 = 1.5x speed, etc.)",
+        env="WHISPER_FLOW_SPEEDUP_AUDIO",
+    )
 
     # AI model configuration
     transcription_model: str = Field(
@@ -137,6 +142,13 @@ class Config(BaseSettings):
         env="WHISPER_FLOW_HOTKEY_COMMAND",
     )
 
+    # Logging configuration
+    logging_enabled: bool = Field(
+        default=False,
+        description="Enable debug logging and print statements",
+        env="WHISPER_FLOW_LOGGING_ENABLED",
+    )
+
     @field_validator("openai_api_key", mode="before")
     @classmethod
     def get_openai_api_key(cls, v):
@@ -166,143 +178,35 @@ class Config(BaseSettings):
         return {"Authorization": f"Bearer {self.openai_api_key}"}
 
     def get_prompts_config(self, mode: str = "default") -> list[dict[str, Any]]:
-        """Load prompts configuration.
+        """Load prompts configuration (legacy method for compatibility).
 
         Args:
-            mode: Configuration mode ('default', 'dictation', 'transcribe', 'auto_transcribe', 'command')
+            mode: Configuration mode (no longer used in simplified system)
 
         Returns:
-            List of prompt rules
+            Empty list since we now use a single template approach
 
         """
-        # Map modes to filenames
-        mode_files = {
-            "dictation": "dictation.yaml",
-            "transcribe": "transcribe.yaml",
-            "auto_transcribe": "auto_transcribe.yaml",
-            "command": "command.yaml",
-            "default": "prompts.yaml",
-        }
-
-        filename = mode_files.get(mode, "prompts.yaml")
-        prompts_file = self.config_dir / filename
-
-        if prompts_file.exists():
-            with open(prompts_file) as f:
-                return yaml.safe_load(f) or []
-
-        # Return default prompts if file doesn't exist
-        return self._get_default_prompts(mode)
+        # Return empty list since we now use a single template approach
+        return []
 
     def _get_default_prompts(self, mode: str) -> list[dict[str, Any]]:
-        """Get default prompt configurations."""
-        if mode == "transcribe" or mode == "auto_transcribe":
-            # Plain transcription modes - no LLM processing
-            return [
-                {
-                    "match": "",
-                    "prompt": "{{text}}",  # Just return the transcript as-is
-                },
-            ]
-        if mode == "command":
-            # Command mode - full LLM processing with context awareness
-            return [
-                {
-                    "match": r"\.py .* Cursor",
-                    "prompt": "Turn transcript into idiomatic Python code that passes basic linters.\nNo markdown. Formatting: 4 spaces and \\n for new line.\n<transcript>{{text}}</transcript>",
-                },
-                {
-                    "match": r"\.js .* Cursor|\.ts .* Cursor",
-                    "prompt": "Turn transcript into clean JavaScript/TypeScript code.\nNo markdown. Use modern ES6+ syntax.\n<transcript>{{text}}</transcript>",
-                },
-                {
-                    "match": "Gmail",
-                    "prompt": "Rewrite transcript as a concise, professional email. Keep paragraphs short.\n<transcript>{{text}}</transcript>",
-                },
-                {
-                    "match": r"terminal|Terminal|bash|zsh|fish",
-                    "prompt": "Convert transcript to appropriate shell commands. Output only the commands, no explanations.\n<transcript>{{text}}</transcript>",
-                },
-                {
-                    "match": "",
-                    "prompt": "Process the transcript and provide a helpful response. Fix grammar and spelling if needed, or answer the question if one was asked.\n<transcript>{{text}}</transcript>",
-                },
-            ]
-        if mode == "dictation":
-            # Legacy dictation mode
-            return [
-                {
-                    "match": "",
-                    "prompt": "Output the transcript exactly as spoken. Do not rephrase, summarize, or fix grammar.\n<transcript>{{text}}</transcript>",
-                },
-            ]
-        # Default/legacy mode
-        return [
-            {
-                "match": r"\.py .* Cursor",
-                "prompt": "Turn transcript into idiomatic Python code that passes basic linters.\nNo markdown. Formatting: 4 spaces and \\n for new line.\n<transcript>{{text}}</transcript>",
-            },
-            {
-                "match": "Gmail",
-                "prompt": "Rewrite transcript as a concise, friendly email. Keep paragraphs short.\n<transcript>{{text}}</transcript>",
-            },
-            {
-                "match": "",
-                "prompt": "Output the transcript and fix any grammatical, spelling, syntax problems and or transcription errors.\n<transcript>{{text}}</transcript>",
-            },
-        ]
+        """Get default prompt configurations (legacy method for compatibility).
+
+        Args:
+            mode: Configuration mode (no longer used in simplified system)
+
+        Returns:
+            Empty list since we now use a single template approach
+
+        """
+        # Return empty list since we now use a single template approach
+        return []
 
     def ensure_config_files(self):
         """Ensure configuration files exist with default content."""
-        # Create default prompts.yaml (legacy/default mode)
-        prompts_file = self.config_dir / "prompts.yaml"
-        if not prompts_file.exists():
-            with open(prompts_file, "w") as f:
-                yaml.dump(
-                    self._get_default_prompts("default"),
-                    f,
-                    default_flow_style=False,
-                )
-
-        # Create default dictation.yaml (legacy dictation mode)
-        dictation_file = self.config_dir / "dictation.yaml"
-        if not dictation_file.exists():
-            with open(dictation_file, "w") as f:
-                yaml.dump(
-                    self._get_default_prompts("dictation"),
-                    f,
-                    default_flow_style=False,
-                )
-
-        # Create transcribe.yaml (plain transcription mode)
-        transcribe_file = self.config_dir / "transcribe.yaml"
-        if not transcribe_file.exists():
-            with open(transcribe_file, "w") as f:
-                yaml.dump(
-                    self._get_default_prompts("transcribe"),
-                    f,
-                    default_flow_style=False,
-                )
-
-        # Create auto_transcribe.yaml (auto-stop transcription mode)
-        auto_transcribe_file = self.config_dir / "auto_transcribe.yaml"
-        if not auto_transcribe_file.exists():
-            with open(auto_transcribe_file, "w") as f:
-                yaml.dump(
-                    self._get_default_prompts("auto_transcribe"),
-                    f,
-                    default_flow_style=False,
-                )
-
-        # Create command.yaml (LLM command mode)
-        command_file = self.config_dir / "command.yaml"
-        if not command_file.exists():
-            with open(command_file, "w") as f:
-                yaml.dump(
-                    self._get_default_prompts("command"),
-                    f,
-                    default_flow_style=False,
-                )
+        # No longer need to create prompt configuration files
+        # The system now uses a single template approach
 
     def model_dump_config(self) -> dict[str, Any]:
         """Export current configuration as a dictionary."""

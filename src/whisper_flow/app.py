@@ -6,6 +6,7 @@ from pathlib import Path
 from .audio import AudioRecorder
 from .completion import CompletionService
 from .config import Config
+from .logging import log, set_logging_enabled
 from .prompts import PromptManager
 from .system import SystemManager
 from .transcription import TranscriptionService
@@ -24,6 +25,9 @@ class WhisperFlow:
         """
         self.config = Config(config_dir=config_dir) if config_dir else Config()
         self.mode = mode
+
+        # Initialize logging based on configuration
+        set_logging_enabled(self.config.logging_enabled)
 
         # Initialize components
         self.system_manager = SystemManager(self.config)
@@ -48,13 +52,13 @@ class WhisperFlow:
             audio_file = self.audio_recorder.record_push_to_talk(stop_key, stop_event)
 
             if not audio_file:
-                print("No audio recorded")
+                log("No audio recorded")
                 return False
 
             return self._process_recorded_audio(audio_file)
 
         except Exception as e:
-            print(f"Error in daemon push-to-talk flow: {e}")
+            log(f"Error in daemon push-to-talk flow: {e}")
             self.system_manager.notify(f"Push-to-talk failed: {e}")
             return False
 
@@ -70,17 +74,17 @@ class WhisperFlow:
         """
         try:
             # Record audio until silence detected
-            print(f"Recording... Will auto-stop after {silence_duration}s of silence")
+            log(f"Recording... Will auto-stop after {silence_duration}s of silence")
             audio_file = self.audio_recorder.record_until_silence(silence_duration)
 
             if not audio_file:
-                print("No audio recorded")
+                log("No audio recorded")
                 return False
 
             return self._process_recorded_audio(audio_file)
 
         except Exception as e:
-            print(f"Error in auto-stop flow: {e}")
+            log(f"Error in auto-stop flow: {e}")
             self.system_manager.notify(f"Auto-stop recording failed: {e}")
             return False
 
@@ -96,63 +100,42 @@ class WhisperFlow:
         """
         try:
             # Transcribe audio
-            print("Transcribing...")
+            log("Transcribing...")
             transcript = self.transcription_service.transcribe_audio(audio_file)
 
             if not transcript:
-                print("Transcription failed")
+                log("Transcription failed")
                 return False
 
-            print(f"Transcript: {transcript}")
+            log(f"Transcript: {transcript}")
 
             # For transcribe and auto_transcribe modes, return transcript as-is
             if self.mode in ["transcribe", "auto_transcribe"]:
                 final_result = transcript
-            else:
-                # Get window context and choose prompt for command mode
-                window_title = self.system_manager.get_active_window_title()
-                prompt_template = self.prompt_manager.choose_prompt(
-                    window_title,
-                    self.mode,
-                )
+            # Use the new simplified prompt system
+            elif self.prompt_manager.should_use_completion():
+                log("Processing with AI...")
+                messages = self.prompt_manager.get_messages(transcript)
 
-                # Process with completion if needed
-                if self.prompt_manager.should_use_completion(prompt_template):
-                    print("Processing with AI...")
-                    processed_prompt = self.prompt_manager.process_prompt(
-                        prompt_template,
-                        transcript,
-                    )
-                    final_result = self.completion_service.complete_text(
-                        processed_prompt,
-                    )
+                final_result = self.completion_service.complete_text(messages)
 
-                    if not final_result:
-                        print("AI processing failed, using raw transcript")
-                        final_result = transcript
-                else:
+                if not final_result:
+                    log("AI processing failed, using raw transcript")
                     final_result = transcript
+            else:
+                final_result = transcript
 
-            print(f"Final result: {final_result}")
+            log(f"Final result: {final_result}")
 
             # Paste the result
             if not self.system_manager.paste_text(final_result):
-                print("Failed to paste text, copying to clipboard...")
+                log("Failed to paste text, copying to clipboard...")
                 self.system_manager._copy_to_clipboard(final_result)
-
-            # Show notification with mode-specific message
-            mode_messages = {
-                "transcribe": "Transcription completed",
-                "auto_transcribe": "Auto-transcription completed",
-                "command": "Command processed",
-            }
-            message = mode_messages.get(self.mode, "Voice input processed")
-            self.system_manager.notify(message)
 
             return True
 
         except Exception as e:
-            print(f"Error processing audio: {e}")
+            log(f"Error processing audio: {e}")
             return False
         finally:
             # Cleanup temporary file
@@ -268,22 +251,20 @@ class WhisperFlow:
     def _validate_system_dependencies(self) -> list[dict]:
         """Validate system dependencies."""
         tests = []
-        deps = {
-            "xdotool": ["xdotool", "--version"],
-            "xclip": ["xclip", "-version"],
-            "xsel": ["xsel", "--version"],
-            "notify-send": ["notify-send", "--version"],
-            "wmctrl": ["wmctrl", "-m"],
-        }
+        deps = ["xdotool", "xclip", "xsel", "notify-send", "wmctrl"]
 
-        for name, cmd in deps.items():
+        for dep in deps:
             try:
                 import subprocess
 
-                result = subprocess.run(cmd, capture_output=True, check=True)
+                result = subprocess.run(
+                    [dep, "--version"],
+                    capture_output=True,
+                    check=True,
+                )
                 tests.append(
                     {
-                        "name": f"System Tool: {name}",
+                        "name": f"System Tool: {dep}",
                         "status": "pass",
                         "message": "Available",
                     },
@@ -291,7 +272,7 @@ class WhisperFlow:
             except (subprocess.CalledProcessError, FileNotFoundError):
                 tests.append(
                     {
-                        "name": f"System Tool: {name}",
+                        "name": f"System Tool: {dep}",
                         "status": "warn",
                         "message": "Not available",
                     },
@@ -393,45 +374,15 @@ class WhisperFlow:
         """Validate configuration files."""
         tests = []
 
-        config_files = [
-            "prompts.yaml",
-            "dictation.yaml",
-            "transcribe.yaml",
-            "auto_transcribe.yaml",
-            "command.yaml",
-        ]
-
-        for filename in config_files:
-            file_path = self.config.config_dir / filename
-            if file_path.exists():
-                try:
-                    import yaml
-
-                    with open(file_path) as f:
-                        yaml.safe_load(f)
-                    tests.append(
-                        {
-                            "name": f"Config File: {filename}",
-                            "status": "pass",
-                            "message": "Valid YAML",
-                        },
-                    )
-                except Exception as e:
-                    tests.append(
-                        {
-                            "name": f"Config File: {filename}",
-                            "status": "fail",
-                            "message": f"Invalid YAML: {e}",
-                        },
-                    )
-            else:
-                tests.append(
-                    {
-                        "name": f"Config File: {filename}",
-                        "status": "warn",
-                        "message": "Missing (will use defaults)",
-                    },
-                )
+        # No longer need to validate prompt configuration files
+        # The system now uses a single template approach
+        tests.append(
+            {
+                "name": "Prompt System",
+                "status": "pass",
+                "message": "Using simplified single template approach",
+            },
+        )
 
         return tests
 
@@ -507,29 +458,18 @@ class WhisperFlow:
 
         # Test API connectivity
         try:
-            import requests
+            from openai import OpenAI
 
-            response = requests.get(
-                "https://api.openai.com/v1/models",
-                headers=self.config.openai_headers,
-                timeout=10,
+            client = OpenAI(api_key=self.config.openai_api_key)
+            models = client.models.list()
+
+            tests.append(
+                {
+                    "name": "API Connectivity",
+                    "status": "pass",
+                    "message": "OpenAI API reachable",
+                },
             )
-            if response.status_code == 200:
-                tests.append(
-                    {
-                        "name": "API Connectivity",
-                        "status": "pass",
-                        "message": "OpenAI API reachable",
-                    },
-                )
-            else:
-                tests.append(
-                    {
-                        "name": "API Connectivity",
-                        "status": "fail",
-                        "message": f"API returned {response.status_code}",
-                    },
-                )
         except Exception as e:
             tests.append(
                 {
@@ -697,42 +637,42 @@ class WhisperFlow:
         """Test configuration file functionality."""
         tests = []
 
-        # Test prompt loading
+        # Test prompt system
         try:
-            prompts = self.config.get_prompts_config("command")
+            prompt_info = self.prompt_manager.get_prompt_info()
             tests.append(
                 {
-                    "name": "Prompt Loading",
+                    "name": "Prompt System",
                     "status": "pass",
-                    "message": f"Loaded {len(prompts)} prompts",
+                    "message": f"Using {prompt_info['system']} system",
                 },
             )
         except Exception as e:
             tests.append(
                 {
-                    "name": "Prompt Loading",
+                    "name": "Prompt System",
                     "status": "fail",
-                    "message": f"Failed to load prompts: {e}",
+                    "message": f"Failed to get prompt info: {e}",
                 },
             )
 
-        # Test prompt matching
+        # Test prompt functionality
         try:
-            test_window = "test.py - Cursor"
-            prompt = self.prompt_manager.choose_prompt(test_window, "command")
+            system_message = self.prompt_manager.get_system_message()
+            user_message = self.prompt_manager.get_user_message("test transcript")
             tests.append(
                 {
-                    "name": "Prompt Matching",
+                    "name": "Prompt Generation",
                     "status": "pass",
-                    "message": "Prompt matching functional",
+                    "message": "Prompt generation functional",
                 },
             )
         except Exception as e:
             tests.append(
                 {
-                    "name": "Prompt Matching",
+                    "name": "Prompt Generation",
                     "status": "fail",
-                    "message": f"Prompt matching failed: {e}",
+                    "message": f"Prompt generation failed: {e}",
                 },
             )
 

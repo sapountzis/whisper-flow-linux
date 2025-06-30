@@ -3,9 +3,10 @@
 import time
 from pathlib import Path
 
-import requests
+from openai import OpenAI
 
 from .config import Config
+from .logging import log
 
 
 class TranscriptionService:
@@ -19,6 +20,9 @@ class TranscriptionService:
 
         """
         self.config = config
+        self.client = (
+            OpenAI(api_key=config.openai_api_key) if config.openai_api_key else None
+        )
 
     def transcribe_audio(self, audio_path: str, max_retries: int = 3) -> str | None:
         """Transcribe audio file using OpenAI API.
@@ -38,7 +42,7 @@ class TranscriptionService:
         for attempt in range(max_retries):
             try:
                 return self._transcribe_with_openai(audio_path)
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 if attempt == max_retries - 1:
                     raise RuntimeError(
                         f"Transcription failed after {max_retries} attempts: {e}",
@@ -46,7 +50,7 @@ class TranscriptionService:
 
                 # Wait before retry (exponential backoff)
                 wait_time = 2**attempt
-                print(
+                log(
                     f"Transcription attempt {attempt + 1} failed, retrying in {wait_time}s...",
                 )
                 time.sleep(wait_time)
@@ -63,29 +67,19 @@ class TranscriptionService:
             Transcribed text
 
         Raises:
-            RuntimeError: If API key is not configured
-            requests.exceptions.RequestException: If API request fails
+            RuntimeError: If API key is not configured or client is not initialized
 
         """
-        if not self.config.openai_api_key:
+        if not self.client:
             raise RuntimeError("OpenAI API key not configured")
 
         with open(audio_path, "rb") as audio_file:
-            files = {"file": ("audio.wav", audio_file, "audio/wav")}
-            data = {
-                "model": self.config.transcription_model,
-                "response_format": "text",
-            }
-
-            response = requests.post(
-                self.config.audio_url,
-                headers=self.config.openai_headers,
-                data=data,
-                files=files,
-                timeout=90,
+            transcription = self.client.audio.transcriptions.create(
+                model=self.config.transcription_model,
+                file=audio_file,
+                response_format="text",
             )
-            response.raise_for_status()
-            return response.text.strip()
+            return transcription.strip()
 
     def get_available_models(self) -> list:
         """Get list of available transcription models.
@@ -128,7 +122,7 @@ class TranscriptionService:
             # Check file size (OpenAI has 25MB limit)
             max_size = 25 * 1024 * 1024  # 25MB in bytes
             if audio_file.stat().st_size > max_size:
-                print(
+                log(
                     f"Audio file too large: {audio_file.stat().st_size} bytes (max: {max_size})",
                 )
                 return False
@@ -144,13 +138,13 @@ class TranscriptionService:
                 ".webm",
             }
             if audio_file.suffix.lower() not in valid_extensions:
-                print(f"Unsupported audio format: {audio_file.suffix}")
+                log(f"Unsupported audio format: {audio_file.suffix}")
                 return False
 
             return True
 
         except Exception as e:
-            print(f"Error validating audio file: {e}")
+            log(f"Error validating audio file: {e}")
             return False
 
     def get_transcription_info(self) -> dict:
@@ -164,5 +158,4 @@ class TranscriptionService:
             "openai_available": self.config.openai_api_key is not None,
             "current_model": self.config.transcription_model,
             "available_models": self.get_available_models(),
-            "audio_url": self.config.audio_url,
         }

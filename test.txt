@@ -1,0 +1,41 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- /home/andreas/projects/whisper-flow/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/andreas/projects/whisper-flow
+configfile: pyproject.toml
+collecting ... collected 32 items
+
+tests/test_app.py::TestWhisperFlow::test_init_default PASSED             [  3%]
+tests/test_app.py::TestWhisperFlow::test_init_with_config_dir PASSED     [  6%]
+tests/test_app.py::TestWhisperFlow::test_run_voice_flow_push_to_talk_daemon_success PASSED [  9%]
+tests/test_app.py::TestWhisperFlow::test_run_voice_flow_push_to_talk_daemon_no_audio PASSED [ 12%]
+tests/test_app.py::TestWhisperFlow::test_run_voice_flow_auto_stop_success PASSED [ 15%]
+tests/test_app.py::TestWhisperFlow::test_run_comprehensive_validation PASSED [ 18%]
+tests/test_app.py::TestWhisperFlow::test_run_comprehensive_tests PASSED  [ 21%]
+tests/test_app.py::TestWhisperFlow::test_process_recorded_audio_transcribe_mode PASSED [ 25%]
+tests/test_app.py::TestWhisperFlow::test_process_recorded_audio_command_mode_with_completion PASSED [ 28%]
+tests/test_app.py::TestWhisperFlow::test_process_recorded_audio_transcription_failure PASSED [ 31%]
+tests/test_app.py::TestWhisperFlow::test_validate_api_config_with_key PASSED [ 34%]
+tests/test_app.py::TestWhisperFlow::test_validate_api_config_without_key PASSED [ 37%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_init PASSED            [ 40%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_test_configuration_success PASSED [ 43%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_test_configuration_with_warnings PASSED [ 46%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_test_configuration_with_failures PASSED [ 50%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_test_configuration_exception PASSED [ 53%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_stop_daemon PASSED     [ 56%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_open_settings PASSED   [ 59%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_get_app_for_mode_transcribe PASSED [ 62%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_get_app_for_mode_auto_transcribe PASSED [ 65%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_get_app_for_mode_command PASSED [ 68%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_get_app_for_mode_unknown PASSED [ 71%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_cancel_recording PASSED [ 75%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_stop_recording PASSED  [ 78%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_notify PASSED          [ 81%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_notify_fallback PASSED [ 84%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_convert_hotkey_string PASSED [ 87%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_create_tray_icon PASSED [ 90%]
+tests/test_daemon.py::TestWhisperFlowDaemon::test_create_recording_icon PASSED [ 93%]
+tests/test_daemon_tray.py::test_daemon_components PASSED                 [ 96%]
+tests/test_tray.py::test_tray_menu SKIPPED (Requires user interactio...) [100%]
+
+================== 31 passed, 1 skipped, 17 warnings in 0.98s ==================

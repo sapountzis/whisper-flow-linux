@@ -9,6 +9,8 @@ import time
 import warnings
 import wave
 
+import numpy as np
+
 # Suppress webrtcvad setuptools warning during import
 with warnings.catch_warnings():
     warnings.filterwarnings(
@@ -41,6 +43,7 @@ except ImportError:
 from pynput import keyboard
 
 from .config import Config
+from .logging import log
 from .system import SystemManager
 
 
@@ -139,7 +142,7 @@ class AudioRecorder:
                             stop_flag["stop"] = True
                             break
                     except Exception as e:
-                        print(f"Error during recording: {e}")
+                        log(f"Error during recording: {e}")
                         break
 
             finally:
@@ -155,7 +158,7 @@ class AudioRecorder:
             return None
 
         except Exception as e:
-            print(f"Recording error: {e}")
+            log(f"Recording error: {e}")
             try:
                 os.unlink(output_path)
             except Exception:
@@ -219,7 +222,7 @@ class AudioRecorder:
                         buf = stream.read(chunk, exception_on_overflow=False)
                         frames.append(buf)
                     except Exception as e:
-                        print(f"Error during recording: {e}")
+                        log(f"Error during recording: {e}")
                         break
 
             finally:
@@ -230,13 +233,13 @@ class AudioRecorder:
             # Save the recorded audio
             if frames:
                 self._save_wav_file(output_path, frames)
-                print("Recording stopped")
+                log("Recording stopped")
                 return output_path
             os.unlink(output_path)
             return None
 
         except Exception as e:
-            print(f"Recording error: {e}")
+            log(f"Recording error: {e}")
             try:
                 os.unlink(output_path)
             except Exception:
@@ -313,19 +316,19 @@ class AudioRecorder:
                             last_voice_time = time.time()
                             if not recording_started:
                                 recording_started = True
-                                print("Voice detected, recording...")
+                                log("Voice detected, recording...")
                         elif recording_started and (
                             time.time() - last_voice_time > silence_duration
                         ):
                             # Stop recording after silence duration
-                            print(
+                            log(
                                 f"Silence detected for {silence_duration}s, stopping...",
                             )
                             stop_flag["stop"] = True
                             break
 
                     except Exception as e:
-                        print(f"Error during recording: {e}")
+                        log(f"Error during recording: {e}")
                         break
 
             finally:
@@ -341,7 +344,7 @@ class AudioRecorder:
             return None
 
         except Exception as e:
-            print(f"Recording error: {e}")
+            log(f"Recording error: {e}")
             try:
                 os.unlink(output_path)
             except Exception:
@@ -356,11 +359,48 @@ class AudioRecorder:
             frames: List of audio frames to save
 
         """
+        # Apply speedup if enabled (not 1.0)
+        if self.config.speedup_audio != 1.0:
+            frames = self._speedup_audio_frames(frames, self.config.speedup_audio)
+
         with wave.open(output_path, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)  # 16-bit
             wf.setframerate(self.config.sample_rate)
             wf.writeframes(b"".join(frames))
+
+    def _speedup_audio_frames(self, frames: list, speed_multiplier: float) -> list:
+        """Speed up audio frames by 1.5x using linear interpolation.
+
+        Args:
+            frames: List of audio frame bytes
+            speed_multiplier: Speed multiplier (1.5 = 1.5x speed, 2.0 = 2x speed, etc.)
+
+        Returns:
+            List of speeded up audio frame bytes
+
+        """
+        if not frames or speed_multiplier == 1.0:
+            return frames
+
+        # Convert frames to numpy array
+        audio_data = b"".join(frames)
+        audio_array = np.frombuffer(audio_data, dtype=np.int16)
+
+        # Calculate new length based on speed multiplier
+        original_length = len(audio_array)
+        new_length = int(original_length / speed_multiplier)
+
+        # Create new time indices for interpolation
+        original_indices = np.arange(original_length)
+        new_indices = np.linspace(0, original_length - 1, new_length)
+
+        # Interpolate audio data
+        speeded_audio = np.interp(new_indices, original_indices, audio_array)
+
+        # Convert back to int16 and then to bytes
+        speeded_audio = speeded_audio.astype(np.int16)
+        return [speeded_audio.tobytes()]
 
     def _check_pyaudio(self) -> bool:
         """Check if PyAudio is available.

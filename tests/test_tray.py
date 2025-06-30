@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pystray
+import pytest
 from PIL import Image, ImageDraw
 
 # Add src to path for imports
@@ -35,6 +36,7 @@ def on_menu_click(icon, item):
         icon.stop()
 
 
+@pytest.mark.skip(reason="Requires user interaction with the system tray.")
 def test_tray_menu():
     """Test tray icon with menu."""
     # Force GTK backend
