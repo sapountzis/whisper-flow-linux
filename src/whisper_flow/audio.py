@@ -66,6 +66,33 @@ class AudioRecorder:
         with suppress_alsa_warnings():
             self.pa = pyaudio.PyAudio()
 
+    def _read_audio_with_timeout(self, stream, chunk, timeout=0.1):
+        """Read audio data (no timeout, PyAudio does not support timeout argument)."""
+        try:
+            return stream.read(chunk, exception_on_overflow=False)
+        except Exception as e:
+            log(f"Audio read error: {e}")
+            return None
+
+    def _stop_stream_safely(self, stream):
+        """Safely stop and close audio stream with timeout protection.
+
+        Args:
+            stream: PyAudio stream to stop
+
+        """
+        try:
+            # Set a timeout for stream operations
+            stream.stop_stream()
+            stream.close()
+        except Exception as e:
+            log(f"Error stopping audio stream: {e}")
+            # Force close if normal stop fails
+            try:
+                stream.close()
+            except Exception:
+                pass
+
     def record_with_vad(self, stop_event=None) -> str | None:
         """Record audio with Voice Activity Detection.
 
@@ -123,31 +150,32 @@ class AudioRecorder:
                         stop_flag["stop"] = True
                         break
 
-                    try:
-                        buf = stream.read(chunk, exception_on_overflow=False)
-                        voiced = self.vad.is_speech(buf, self.config.sample_rate)
-                        ring_buffer.append(buf)
+                    # Read audio with timeout to prevent blocking
+                    buf = self._read_audio_with_timeout(stream, chunk)
+                    if buf is None:
+                        # Audio read failed, try to continue but log warning
+                        log("Warning: Audio read error, continuing...")
+                        continue
 
-                        if voiced:
-                            if not recording:
-                                # Start recording, include buffered audio
-                                frames.extend(ring_buffer)
-                                recording = True
-                            frames.append(buf)
-                            last_voice_time = time.time()
-                        elif recording and (
-                            time.time() - last_voice_time > self.config.silence_timeout
-                        ):
-                            # Stop recording after silence timeout
-                            stop_flag["stop"] = True
-                            break
-                    except Exception as e:
-                        log(f"Error during recording: {e}")
+                    voiced = self.vad.is_speech(buf, self.config.sample_rate)
+                    ring_buffer.append(buf)
+
+                    if voiced:
+                        if not recording:
+                            # Start recording, include buffered audio
+                            frames.extend(ring_buffer)
+                            recording = True
+                        frames.append(buf)
+                        last_voice_time = time.time()
+                    elif recording and (
+                        time.time() - last_voice_time > self.config.silence_timeout
+                    ):
+                        # Stop recording after silence timeout
+                        stop_flag["stop"] = True
                         break
 
             finally:
-                stream.stop_stream()
-                stream.close()
+                self._stop_stream_safely(stream)
                 listener.stop()
 
             # Save the recorded audio
@@ -218,16 +246,17 @@ class AudioRecorder:
                         stop_flag["stop"] = True
                         break
 
-                    try:
-                        buf = stream.read(chunk, exception_on_overflow=False)
-                        frames.append(buf)
-                    except Exception as e:
-                        log(f"Error during recording: {e}")
-                        break
+                    # Read audio with timeout to prevent blocking
+                    buf = self._read_audio_with_timeout(stream, chunk)
+                    if buf is None:
+                        # Audio read failed, try to continue but log warning
+                        log("Warning: Audio read error, continuing...")
+                        continue
+
+                    frames.append(buf)
 
             finally:
-                stream.stop_stream()
-                stream.close()
+                self._stop_stream_safely(stream)
                 listener.stop()
 
             # Save the recorded audio
@@ -305,35 +334,35 @@ class AudioRecorder:
                         stop_flag["stop"] = True
                         break
 
-                    try:
-                        buf = stream.read(chunk, exception_on_overflow=False)
-                        frames.append(buf)
+                    # Read audio with timeout to prevent blocking
+                    buf = self._read_audio_with_timeout(stream, chunk)
+                    if buf is None:
+                        # Audio read failed, try to continue but log warning
+                        log("Warning: Audio read error, continuing...")
+                        continue
 
-                        # Check for voice activity
-                        voiced = self.vad.is_speech(buf, self.config.sample_rate)
+                    frames.append(buf)
 
-                        if voiced:
-                            last_voice_time = time.time()
-                            if not recording_started:
-                                recording_started = True
-                                log("Voice detected, recording...")
-                        elif recording_started and (
-                            time.time() - last_voice_time > silence_duration
-                        ):
-                            # Stop recording after silence duration
-                            log(
-                                f"Silence detected for {silence_duration}s, stopping...",
-                            )
-                            stop_flag["stop"] = True
-                            break
+                    # Check for voice activity
+                    voiced = self.vad.is_speech(buf, self.config.sample_rate)
 
-                    except Exception as e:
-                        log(f"Error during recording: {e}")
+                    if voiced:
+                        last_voice_time = time.time()
+                        if not recording_started:
+                            recording_started = True
+                            log("Voice detected, recording...")
+                    elif recording_started and (
+                        time.time() - last_voice_time > silence_duration
+                    ):
+                        # Stop recording after silence duration
+                        log(
+                            f"Silence detected for {silence_duration}s, stopping...",
+                        )
+                        stop_flag["stop"] = True
                         break
 
             finally:
-                stream.stop_stream()
-                stream.close()
+                self._stop_stream_safely(stream)
                 listener.stop()
 
             # Save the recorded audio

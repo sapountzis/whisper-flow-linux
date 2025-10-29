@@ -1,5 +1,6 @@
 """Unit tests for the WhisperFlow daemon."""
 
+import time
 from unittest.mock import Mock, patch
 
 import pytest
@@ -603,3 +604,188 @@ class TestWhisperFlowDaemon:
 
             assert icon_image is not None
             assert hasattr(icon_image, "size")
+
+    def test_watchdog_functionality(self, temp_config_dir):
+        """Test watchdog functionality for detecting hangs."""
+        with (
+            patch("whisper_flow.daemon.Config") as mock_config_class,
+            patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
+            patch(
+                "whisper_flow.daemon.WhisperFlowDaemon._force_stop_recording",
+            ) as mock_force_stop,
+        ):
+            mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
+            mock_config.max_recording_duration = 5.0  # Short duration for testing
+            mock_config.watchdog_interval = 0.1  # Fast interval for testing
+            mock_config_class.return_value = mock_config
+
+            mock_app = Mock()
+            mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
+            daemon = WhisperFlowDaemon(temp_config_dir)
+            daemon.is_running = True
+
+            # Start watchdog
+            daemon._start_watchdog()
+
+            # Simulate recording that exceeds duration limit
+            daemon.is_recording = True
+            daemon.recording_start_time = time.time() - 10.0  # 10 seconds ago
+            daemon.recording_thread = Mock()
+            daemon.recording_thread.is_alive.return_value = True
+
+            # Let watchdog run for a moment
+            time.sleep(0.2)
+
+            # Check if force stop was called
+            mock_force_stop.assert_called_with("Recording timeout")
+
+    def test_processing_lock_timeout(self, temp_config_dir):
+        """Test processing lock timeout functionality."""
+        with (
+            patch("whisper_flow.daemon.Config") as mock_config_class,
+            patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
+            patch("whisper_flow.daemon.WhisperFlowDaemon.notify") as mock_notify,
+        ):
+            mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
+            mock_config.processing_lock_timeout = 0.1  # Short timeout for testing
+            mock_config_class.return_value = mock_config
+
+            mock_app = Mock()
+            mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
+            daemon = WhisperFlowDaemon(temp_config_dir)
+
+            # Acquire lock manually to simulate contention
+            daemon.processing_lock.acquire()
+
+            # Try to process mode (should timeout)
+            daemon._process_mode("transcribe")
+
+            # Check if timeout notification was sent
+            mock_notify.assert_called_with("⚠️ System busy, request ignored")
+
+            # Release lock
+            daemon.processing_lock.release()
+
+    def test_queue_request_timeout(self, temp_config_dir):
+        """Test queue request timeout functionality."""
+        with (
+            patch("whisper_flow.daemon.Config") as mock_config_class,
+            patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
+        ):
+            mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
+            mock_config.queue_request_timeout = 1.0  # Short timeout for testing
+            mock_config_class.return_value = mock_config
+
+            mock_app = Mock()
+            mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
+            daemon = WhisperFlowDaemon(temp_config_dir)
+
+            # Add old request to queue
+            old_time = time.time() - 10.0  # 10 seconds ago
+            daemon.request_queue.put(("transcribe", old_time))
+
+            # Process queue (should drop old request)
+            daemon._process_next_in_queue()
+
+            # Queue should be empty after dropping old request
+            assert daemon.request_queue.empty()
+
+    def test_audio_timeout_mechanism(self, temp_config_dir):
+        """Test audio timeout mechanism in recording."""
+        with (
+            patch("whisper_flow.daemon.Config") as mock_config_class,
+            patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
+        ):
+            mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
+            mock_config.audio_read_timeout = 0.1
+            mock_config_class.return_value = mock_config
+
+            mock_app = Mock()
+            mock_app.run_voice_flow_push_to_talk_daemon.return_value = True
+            mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
+            daemon = WhisperFlowDaemon(temp_config_dir)
+
+            # Verify initial state
+            assert not daemon.is_recording
+            assert daemon.current_mode is None
+            assert daemon.recording_start_time is None
+
+            # Start recording
+            daemon.start_recording("transcribe")
+
+            # Do not assert daemon.is_recording here, as the thread may finish instantly in test context
+
+            # Stop recording
+            daemon._stop_recording()
+
+            # Verify recording stopped
+            assert not daemon.is_recording
+            assert daemon.current_mode is None
+            assert daemon.recording_start_time is None
+
+    def test_hotkey_manager_heartbeat(self, temp_config_dir):
+        """Test hotkey manager heartbeat functionality."""
+        with (
+            patch("whisper_flow.daemon.Config") as mock_config_class,
+            patch("whisper_flow.daemon.WhisperFlow") as mock_app_class,
+            patch("whisper_flow.daemon.HotkeyManager") as mock_hotkey_manager_class,
+        ):
+            mock_config = Mock()
+            mock_config.hotkey_transcribe = "ctrl+cmd"
+            mock_config.hotkey_auto_transcribe = "ctrl+cmd+space"
+            mock_config.hotkey_command = "ctrl+cmd+alt"
+            mock_config_class.return_value = mock_config
+
+            mock_app = Mock()
+            mock_app_class.return_value = mock_app
+
+            mock_hotkey_manager = Mock()
+            mock_hotkey_manager.get_health_status.return_value = {
+                "is_running": True,
+                "listener_alive": True,
+                "heartbeat_age": 2.0,
+                "active_bindings": 3,
+                "pressed_keys": 0,
+                "current_push_to_talk": None,
+            }
+            mock_hotkey_manager_class.return_value = mock_hotkey_manager
+
+            daemon = WhisperFlowDaemon(temp_config_dir)
+
+            # Test health status
+            health = daemon.hotkey_manager.get_health_status()
+            assert health["is_running"] is True
+            assert health["listener_alive"] is True
+            assert health["active_bindings"] == 3

@@ -6,6 +6,7 @@ from typing import TypedDict
 from openai import OpenAI
 
 from .config import Config
+from .logging import log
 
 
 # Message type definitions
@@ -58,7 +59,7 @@ class CompletionService:
 
                 # Wait before retry (exponential backoff)
                 wait_time = 2**attempt
-                print(
+                log(
                     f"Completion attempt {attempt + 1} failed, retrying in {wait_time}s...",
                 )
                 time.sleep(wait_time)

@@ -183,14 +183,6 @@ def status(config_dir: ConfigDirOption = None):
     typer.echo(f"  Completion Available: {completion_available}")
     typer.echo()
 
-    # Prompt system information
-    typer.echo("Prompt System:")
-    prompt_info = flow_app.prompt_manager.get_prompt_info()
-    typer.echo(f"  System: {prompt_info['system']}")
-    typer.echo(f"  Variables: {', '.join(prompt_info['variables'])}")
-    typer.echo(f"  Description: {prompt_info['description']}")
-    typer.echo()
-
     # Usage instructions
     typer.echo("Getting Started:")
     if not flow_app.config.openai_api_key:
@@ -235,44 +227,6 @@ def validate(config_dir: ConfigDirOption = None):
 
     except Exception as e:
         typer.echo(f"Validation error: {e}", err=True)
-        raise typer.Exit(1)
-
-
-@app.command("test-all")
-def test_all(
-    config_dir: ConfigDirOption = None,
-    verbose: Annotated[
-        bool,
-        Option("--verbose", "-v", help="Show detailed test output"),
-    ] = False,
-):
-    """Run comprehensive tests of all system components."""
-    flow_app = WhisperFlow(config_dir)
-
-    typer.echo("Running comprehensive system tests...")
-    typer.echo("=" * 50)
-
-    try:
-        # Run all tests
-        test_results = flow_app.run_comprehensive_tests(verbose=verbose)
-
-        # Display summary
-        total_tests = sum(len(tests) for tests in test_results.values())
-        passed_tests = sum(
-            len([t for t in tests if t["status"] == "pass"])
-            for tests in test_results.values()
-        )
-
-        typer.echo(f"\nTest Results: {passed_tests}/{total_tests} tests passed")
-
-        if passed_tests == total_tests:
-            typer.echo("🎉 All tests passed! System is fully functional.")
-        else:
-            typer.echo("⚠️  Some tests failed. System may have issues.")
-            raise typer.Exit(1)
-
-    except Exception as e:
-        typer.echo(f"Test execution error: {e}", err=True)
         raise typer.Exit(1)
 
 

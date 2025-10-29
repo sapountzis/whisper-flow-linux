@@ -1,17 +1,13 @@
 """Simplified prompt management for whisper-flow."""
 
-from datetime import datetime
-from typing import Any
-
 from .completion import MessageType
-from .config import Config
 from .system import SystemManager
 
 
 class PromptManager:
     """Simplified prompt manager with single template approach."""
 
-    def __init__(self, config: Config, system_manager: SystemManager):
+    def __init__(self, config, system_manager: SystemManager):
         """Initialize prompt manager.
 
         Args:
@@ -44,27 +40,16 @@ class PromptManager:
             transcript: Transcribed text from the user
 
         Returns:
-            Formatted user message with date, time, and highlighted text context
+            Formatted user message with highlighted text context
 
         """
         if not transcript.strip():
             return ""
 
-        # Get current date and time
-        now = datetime.now()
-        date = now.strftime("%Y-%m-%d")
-        time = now.strftime("%H:%M:%S")
-
         # Get highlighted text if any
         highlighted_text = self.system_manager.get_highlighted_text()
 
         message_template = """
-# Context
-<context>
-Date: {date}
-Time: {time}
-</context>
-
 # Use selected text if any
 <selected_text>
 {highlighted_text}
@@ -77,8 +62,6 @@ Time: {time}
 """
 
         return message_template.format(
-            date=date,
-            time=time,
             highlighted_text=f"Highlighted text: {highlighted_text}"
             if highlighted_text
             else "",
@@ -111,17 +94,3 @@ Time: {time}
 
         """
         return True
-
-    def get_prompt_info(self) -> dict[str, Any]:
-        """Get information about the current prompt system.
-
-        Returns:
-            Dictionary containing prompt system information
-
-        """
-        return {
-            "system": "single_template",
-            "system_message": self.get_system_message(),
-            "variables": ["date", "time", "highlighted_text", "user_input"],
-            "description": "Single prompt template with context variables",
-        }
